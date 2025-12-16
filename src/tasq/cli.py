@@ -1,7 +1,7 @@
-"""tasq CLIモジュール
+"""tasq CLI module.
 
-Typerを使用したCLIアプリケーションのエントリーポイント。
-サブコマンドグループ: task, config, self
+Typer-based CLI application entry point.
+Subcommand groups: task, config, self
 """
 
 import json
@@ -11,53 +11,44 @@ from typing import Annotated, Optional
 import typer
 
 from tasq import __version__
-from tasq.config import (
-    SOURCE_CLI,
-    SOURCE_CONFIG,
-    SOURCE_DEFAULT,
-    SOURCE_ENV,
-    get_config_path,
-    get_todo_file_path,
-    write_config,
-)
-from tasq.storage import append_line, read_lines, update_line
-from tasq.todotxt import format_new_task, is_completed, mark_complete, parse_task
+from tasq.config import Config
+from tasq.storage import TodoFile
+from tasq.todotxt import Task
 
-# メインアプリケーション
+# Main application
 app = typer.Typer(
     name="tasq",
-    help="todo.txt互換のFIFOキュー型タスク管理ツール",
+    help="A todo.txt-compatible FIFO queue task management tool",
     no_args_is_help=True,
 )
 
-# サブコマンドグループ
+# Subcommand groups
 task_app = typer.Typer(
     name="task",
-    help="タスク操作コマンド",
+    help="Task operations",
     no_args_is_help=True,
 )
 
 config_app = typer.Typer(
     name="config",
-    help="設定コマンド",
+    help="Configuration commands",
     no_args_is_help=True,
 )
 
 self_app = typer.Typer(
     name="self",
-    help="ツール情報コマンド",
+    help="Tool information",
     no_args_is_help=True,
 )
 
-# サブコマンドグループをメインアプリに追加
+# Add subcommand groups to main app
 app.add_typer(task_app, name="task")
 app.add_typer(config_app, name="config")
 app.add_typer(self_app, name="self")
 
 
-# グローバルオプション用のコンテキスト
 class GlobalContext:
-    """グローバルオプションを保持するコンテキスト"""
+    """Holds global options for commands."""
 
     def __init__(self) -> None:
         self.file: str | None = None
@@ -65,12 +56,12 @@ class GlobalContext:
         self.verbose: bool = False
 
 
-# コンテキスト変数
+# Global context instance
 _context = GlobalContext()
 
 
 def version_callback(value: bool) -> None:
-    """--version オプションのコールバック"""
+    """Callback for --version option."""
     if value:
         typer.echo(f"tasq version {__version__}")
         raise typer.Exit()
@@ -83,7 +74,7 @@ def main_callback(
         typer.Option(
             "--file",
             "-f",
-            help="todo.txtファイルのパスを指定",
+            help="Specify the todo.txt file path",
         ),
     ] = None,
     json_output: Annotated[
@@ -91,7 +82,7 @@ def main_callback(
         typer.Option(
             "--json",
             "-j",
-            help="JSON形式で出力",
+            help="Output in JSON format",
         ),
     ] = False,
     verbose: Annotated[
@@ -99,7 +90,7 @@ def main_callback(
         typer.Option(
             "--verbose",
             "-v",
-            help="詳細ログを表示",
+            help="Show verbose output",
         ),
     ] = False,
     version: Annotated[
@@ -107,179 +98,160 @@ def main_callback(
         typer.Option(
             "--version",
             "-V",
-            help="バージョンを表示",
+            help="Show version and exit",
             callback=version_callback,
             is_eager=True,
         ),
     ] = False,
 ) -> None:
-    """tasq - todo.txt互換のFIFOキュー型タスク管理ツール"""
+    """tasq - A todo.txt-compatible FIFO queue task management tool."""
     _context.file = file
     _context.json_output = json_output
     _context.verbose = verbose
 
 
-# ===== task サブコマンド =====
+# ===== task subcommands =====
 
 
 @task_app.command("in")
 def task_in(
     text: Annotated[
         str,
-        typer.Argument(help="追加するタスクのテキスト"),
+        typer.Argument(help="Task text to add"),
     ],
 ) -> None:
-    """新しいタスクをキューの末尾に追加する"""
-    todo_path, source = get_todo_file_path(_context.file)
+    """Add a new task to the end of the queue."""
+    config = Config(_context.file)
+    todo_path = config.todo_file_path
 
     if _context.verbose:
-        typer.echo(f"[verbose] todo.txt: {todo_path} (from {source})")
+        typer.echo(f"[verbose] todo.txt: {todo_path} (from {config.source})")
 
-    # 新規タスク行を生成（作成日付き）
-    task_line = format_new_task(text, add_creation_date=True)
+    # Create new task with creation date
+    task = Task.create(text, add_creation_date=True)
 
-    # ファイルに追加
-    append_line(todo_path, task_line)
+    # Append to file
+    todo_file = TodoFile(todo_path)
+    todo_file.append_task(task)
 
+    task_line = task.to_line()
     if _context.json_output:
         result = {"added": task_line, "file": str(todo_path)}
         typer.echo(json.dumps(result, ensure_ascii=False))
     else:
-        typer.echo(f"追加: {task_line}")
+        typer.echo(f"Added: {task_line}")
 
 
 @task_app.command("next")
 def task_next() -> None:
-    """キューの先頭にある次の未完了タスクを表示する"""
-    todo_path, source = get_todo_file_path(_context.file)
+    """Show the next incomplete task at the front of the queue."""
+    config = Config(_context.file)
+    todo_path = config.todo_file_path
 
     if _context.verbose:
-        typer.echo(f"[verbose] todo.txt: {todo_path} (from {source})")
+        typer.echo(f"[verbose] todo.txt: {todo_path} (from {config.source})")
 
-    # ファイルが存在しない場合
-    if not todo_path.exists():
+    todo_file = TodoFile(todo_path)
+
+    # File doesn't exist
+    if not todo_file.exists():
         if _context.json_output:
             typer.echo(json.dumps({"error": "No tasks found", "file": str(todo_path)}))
         else:
-            typer.echo("タスクがありません（ファイルが存在しません）")
+            typer.echo("No tasks found (file does not exist)")
         raise typer.Exit(code=1)
 
-    # 最初の未完了タスクを探す
-    lines = read_lines(todo_path)
-    for index, line in enumerate(lines):
-        if line.strip() and not is_completed(line):
-            parsed = parse_task(line)
+    # Find first incomplete task
+    result = todo_file.get_next_incomplete()
+    if result is None:
+        if _context.json_output:
+            typer.echo(
+                json.dumps({"error": "No incomplete tasks", "file": str(todo_path)})
+            )
+        else:
+            typer.echo("No incomplete tasks")
+        raise typer.Exit(code=1)
 
-            if _context.json_output:
-                result = {
-                    "index": index,
-                    "text": line,
-                    "completed": parsed["completed"],
-                    "completion_date": parsed["completion_date"],
-                    "creation_date": parsed["creation_date"],
-                    "priority": parsed["priority"],
-                    "projects": parsed["projects"],
-                    "contexts": parsed["contexts"],
-                    "key_values": parsed["key_values"],
-                }
-                typer.echo(json.dumps(result, ensure_ascii=False))
-            else:
-                typer.echo(line)
-            return
+    index, task = result
 
-    # 未完了タスクが見つからない場合
     if _context.json_output:
-        typer.echo(json.dumps({"error": "No incomplete tasks", "file": str(todo_path)}))
+        output = {"index": index, **task.to_dict()}
+        typer.echo(json.dumps(output, ensure_ascii=False))
     else:
-        typer.echo("未完了タスクがありません")
-    raise typer.Exit(code=1)
+        typer.echo(task.text)
 
 
 @task_app.command("done")
 def task_done() -> None:
-    """キューの先頭にある次の未完了タスクを完了としてマークする"""
-    todo_path, source = get_todo_file_path(_context.file)
+    """Mark the next incomplete task as complete."""
+    config = Config(_context.file)
+    todo_path = config.todo_file_path
 
     if _context.verbose:
-        typer.echo(f"[verbose] todo.txt: {todo_path} (from {source})")
+        typer.echo(f"[verbose] todo.txt: {todo_path} (from {config.source})")
 
-    # ファイルが存在しない場合
-    if not todo_path.exists():
-        typer.echo("タスクがありません（ファイルが存在しません）", err=True)
+    todo_file = TodoFile(todo_path)
+
+    # File doesn't exist
+    if not todo_file.exists():
+        typer.echo("No tasks found (file does not exist)", err=True)
         raise typer.Exit(code=1)
 
-    # 最初の未完了タスクを探して完了にする
-    lines = read_lines(todo_path)
-    for index, line in enumerate(lines):
-        if line.strip() and not is_completed(line):
-            # タスクを完了としてマーク
-            completed_line = mark_complete(line)
+    # Find and complete first incomplete task
+    result = todo_file.get_next_incomplete()
+    if result is None:
+        typer.echo("No incomplete tasks", err=True)
+        raise typer.Exit(code=1)
 
-            # ファイルを更新
-            update_line(todo_path, index, completed_line)
+    index, original_task = result
+    completed_task = todo_file.complete_task(index)
 
-            if _context.json_output:
-                result = {
-                    "completed": completed_line,
-                    "original": line,
-                    "index": index,
-                }
-                typer.echo(json.dumps(result, ensure_ascii=False))
-            else:
-                typer.echo(f"完了: {completed_line}")
-            return
-
-    # 未完了タスクが見つからない場合
-    typer.echo("未完了タスクがありません", err=True)
-    raise typer.Exit(code=1)
+    if _context.json_output:
+        output = {
+            "completed": completed_task.to_line(),
+            "original": original_task.text,
+            "index": index,
+        }
+        typer.echo(json.dumps(output, ensure_ascii=False))
+    else:
+        typer.echo(f"Done: {completed_task.to_line()}")
 
 
-# ===== config サブコマンド =====
+# ===== config subcommands =====
 
 
 @config_app.command("path")
 def config_path() -> None:
-    """現在解決されているtodo.txtのパスを表示する"""
-    todo_path, source = get_todo_file_path(_context.file)
-
-    # ソースの説明
-    source_descriptions = {
-        SOURCE_CLI: "CLIオプション (--file)",
-        SOURCE_ENV: "環境変数 (TASQ_FILE)",
-        SOURCE_CONFIG: f"設定ファイル ({get_config_path()})",
-        SOURCE_DEFAULT: "デフォルト",
-    }
-    source_desc = source_descriptions.get(source, source)
+    """Show the resolved todo.txt path."""
+    config = Config(_context.file)
 
     if _context.json_output:
         result = {
-            "path": str(todo_path),
-            "source": source,
-            "source_description": source_desc,
-            "exists": todo_path.exists(),
+            "path": str(config.todo_file_path),
+            "source": config.source,
+            "source_description": config.source_description,
+            "exists": config.todo_file_path.exists(),
         }
         typer.echo(json.dumps(result, ensure_ascii=False))
     else:
-        typer.echo(f"パス: {todo_path}")
-        typer.echo(f"ソース: {source_desc}")
-        typer.echo(f"存在: {'はい' if todo_path.exists() else 'いいえ'}")
+        typer.echo(f"Path: {config.todo_file_path}")
+        typer.echo(f"Source: {config.source_description}")
+        exists_str = "Yes" if config.todo_file_path.exists() else "No"
+        typer.echo(f"Exists: {exists_str}")
 
 
 @config_app.command("set-path")
 def config_set_path(
     path: Annotated[
         str,
-        typer.Argument(help="設定するtodo.txtのパス"),
+        typer.Argument(help="Path to set as default todo.txt"),
     ],
 ) -> None:
-    """todo.txtのデフォルトパスを設定ファイルに保存する"""
-    # パスを絶対パスに変換
+    """Save the default todo.txt path to the config file."""
     abs_path = Path(path).resolve()
 
-    # 設定ファイルに書き込み
-    write_config(str(abs_path))
-
-    config_file = get_config_path()
+    Config.save(str(abs_path))
+    config_file = Config.get_config_path()
 
     if _context.json_output:
         result = {
@@ -288,16 +260,16 @@ def config_set_path(
         }
         typer.echo(json.dumps(result, ensure_ascii=False))
     else:
-        typer.echo(f"設定を保存しました: {abs_path}")
-        typer.echo(f"設定ファイル: {config_file}")
+        typer.echo(f"Configuration saved: {abs_path}")
+        typer.echo(f"Config file: {config_file}")
 
 
-# ===== self サブコマンド =====
+# ===== self subcommands =====
 
 
 @self_app.command("version")
 def self_version() -> None:
-    """バージョン情報を表示する"""
+    """Show version information."""
     if _context.json_output:
         result = {"version": __version__}
         typer.echo(json.dumps(result, ensure_ascii=False))
@@ -306,7 +278,7 @@ def self_version() -> None:
 
 
 def main() -> None:
-    """CLIエントリーポイント"""
+    """CLI entry point."""
     app()
 
 

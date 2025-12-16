@@ -1,4 +1,4 @@
-"""設定コマンドのテスト"""
+"""Configuration command tests."""
 
 import json
 import os
@@ -16,20 +16,20 @@ runner = CliRunner()
 
 
 class TestConfigPath:
-    """tasq config path コマンドのテスト"""
+    """Tests for tasq config path command."""
 
     def test_config_path_with_cli_option(self, tmp_path: Path) -> None:
-        """CLIオプションで指定したパスが最優先されることを確認"""
+        """Verify CLI option takes highest priority."""
         todo_file = tmp_path / "cli-todo.txt"
 
         result = runner.invoke(app, ["--file", str(todo_file), "config", "path"])
 
         assert result.exit_code == 0
         assert str(todo_file) in result.stdout
-        assert "CLIオプション" in result.stdout
+        assert "CLI option" in result.stdout
 
     def test_config_path_with_env_var(self, tmp_path: Path) -> None:
-        """環境変数で指定したパスが使用されることを確認"""
+        """Verify environment variable is used."""
         todo_file = tmp_path / "env-todo.txt"
 
         with patch.dict(os.environ, {"TASQ_FILE": str(todo_file)}):
@@ -37,10 +37,10 @@ class TestConfigPath:
 
         assert result.exit_code == 0
         assert str(todo_file) in result.stdout
-        assert "環境変数" in result.stdout
+        assert "Environment variable" in result.stdout
 
     def test_config_path_json_output(self, tmp_path: Path) -> None:
-        """JSON出力モードの確認"""
+        """Verify JSON output mode."""
         todo_file = tmp_path / "todo.txt"
 
         result = runner.invoke(
@@ -55,16 +55,16 @@ class TestConfigPath:
 
 
 class TestConfigSetPath:
-    """tasq config set-path コマンドのテスト"""
+    """Tests for tasq config set-path command."""
 
     def test_config_set_path_creates_config_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """設定ファイルが作成されることを確認"""
+        """Verify config file is created."""
         config_dir = tmp_path / "config"
         config_file = config_dir / "tasq" / "config.toml"
 
-        # プラットフォームに応じた設定ディレクトリ環境変数を設定
+        # Set platform-specific config directory
         if sys.platform == "win32":
             monkeypatch.setenv("APPDATA", str(config_dir))
         else:
@@ -75,17 +75,19 @@ class TestConfigSetPath:
         result = runner.invoke(app, ["config", "set-path", str(todo_file)])
 
         assert result.exit_code == 0
-        assert "設定を保存しました" in result.stdout
+        assert "Configuration saved" in result.stdout
 
-        # 設定ファイルが作成されたか確認
+        # Verify config file was created
         assert config_file.exists()
         content = config_file.read_text(encoding="utf-8")
-        assert str(todo_file.resolve()) in content
+        # Path is escaped in TOML file on Windows
+        escaped_path = str(todo_file.resolve()).replace("\\", "\\\\")
+        assert escaped_path in content or str(todo_file.resolve()) in content
 
     def test_config_set_path_json_output(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """JSON出力モードの確認"""
+        """Verify JSON output mode."""
         config_dir = tmp_path / "config"
         if sys.platform == "win32":
             monkeypatch.setenv("APPDATA", str(config_dir))
@@ -103,10 +105,10 @@ class TestConfigSetPath:
 
 
 class TestConfigPrecedence:
-    """設定優先順位のテスト"""
+    """Tests for configuration precedence."""
 
     def test_cli_overrides_env(self, tmp_path: Path) -> None:
-        """CLIオプションが環境変数より優先されることを確認"""
+        """Verify CLI option overrides environment variable."""
         cli_file = tmp_path / "cli.txt"
         env_file = tmp_path / "env.txt"
 
@@ -115,12 +117,12 @@ class TestConfigPrecedence:
 
         assert result.exit_code == 0
         assert str(cli_file) in result.stdout
-        assert "CLIオプション" in result.stdout
+        assert "CLI option" in result.stdout
 
     def test_env_overrides_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """環境変数が設定ファイルより優先されることを確認"""
+        """Verify environment variable overrides config file."""
         config_dir = tmp_path / "config"
         config_file = config_dir / "tasq" / "config.toml"
         config_file.parent.mkdir(parents=True)
@@ -128,7 +130,7 @@ class TestConfigPrecedence:
         config_todo = tmp_path / "config.txt"
         env_todo = tmp_path / "env.txt"
 
-        # 設定ファイルを作成（Windowsのバックスラッシュをエスケープ）
+        # Create config file (escape backslashes for Windows)
         escaped_path = str(config_todo).replace("\\", "\\\\")
         config_file.write_text(f'todo_file = "{escaped_path}"\n', encoding="utf-8")
 
@@ -142,19 +144,19 @@ class TestConfigPrecedence:
 
         assert result.exit_code == 0
         assert str(env_todo) in result.stdout
-        assert "環境変数" in result.stdout
+        assert "Environment variable" in result.stdout
 
     def test_config_overrides_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """設定ファイルがデフォルトより優先されることを確認"""
+        """Verify config file overrides default."""
         config_dir = tmp_path / "config"
         config_file = config_dir / "tasq" / "config.toml"
         config_file.parent.mkdir(parents=True)
 
         config_todo = tmp_path / "my-todo.txt"
 
-        # 設定ファイルを作成（Windowsのバックスラッシュをエスケープ）
+        # Create config file (escape backslashes for Windows)
         escaped_path = str(config_todo).replace("\\", "\\\\")
         config_file.write_text(f'todo_file = "{escaped_path}"\n', encoding="utf-8")
 
@@ -162,27 +164,27 @@ class TestConfigPrecedence:
             monkeypatch.setenv("APPDATA", str(config_dir))
         else:
             monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir))
-        # TASQ_FILE環境変数を削除
+        # Remove TASQ_FILE environment variable
         monkeypatch.delenv("TASQ_FILE", raising=False)
 
         result = runner.invoke(app, ["config", "path"])
 
         assert result.exit_code == 0
         assert str(config_todo) in result.stdout
-        assert "設定ファイル" in result.stdout
+        assert "Config file" in result.stdout
 
 
 class TestGetTodoFilePath:
-    """get_todo_file_path 関数のテスト"""
+    """Tests for get_todo_file_path function."""
 
     def test_cli_path_highest_priority(self) -> None:
-        """CLIパスが最優先であることを確認"""
+        """Verify CLI path has highest priority."""
         path, source = get_todo_file_path("/cli/path/todo.txt")
         assert source == "cli"
         assert path == Path("/cli/path/todo.txt").resolve()
 
     def test_env_var_used_when_no_cli(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """CLIがない場合に環境変数が使用されることを確認"""
+        """Verify environment variable is used when no CLI path."""
         monkeypatch.setenv("TASQ_FILE", "/env/todo.txt")
         path, source = get_todo_file_path(None)
         assert source == "env"
@@ -190,15 +192,15 @@ class TestGetTodoFilePath:
     def test_default_fallback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """デフォルトへのフォールバックを確認"""
-        # 環境変数を削除
+        """Verify fallback to default."""
+        # Remove environment variable
         monkeypatch.delenv("TASQ_FILE", raising=False)
-        # 設定ファイルがない場所を設定
+        # Set config file location to non-existent path
         if sys.platform == "win32":
             monkeypatch.setenv("APPDATA", str(tmp_path / "nonexistent"))
         else:
             monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nonexistent"))
-        # カレントディレクトリにtodo.txtがない状態で実行
+        # Change to directory without todo.txt
         monkeypatch.chdir(tmp_path)
 
         path, source = get_todo_file_path(None)

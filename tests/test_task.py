@@ -1,4 +1,4 @@
-"""タスクコマンドのテスト"""
+"""Task command tests."""
 
 import json
 from pathlib import Path
@@ -11,124 +11,122 @@ runner = CliRunner()
 
 
 class TestTaskIn:
-    """tasq task in コマンドのテスト"""
+    """Tests for tasq task in command."""
 
     def test_task_in_adds_task_with_date(self, tmp_path: Path) -> None:
-        """タスク追加時に作成日が付与されることを確認"""
+        """Verify task is added with creation date."""
         todo_file = tmp_path / "todo.txt"
 
         result = runner.invoke(
-            app, ["--file", str(todo_file), "task", "in", "テストタスク"]
+            app, ["--file", str(todo_file), "task", "in", "Test task"]
         )
 
         assert result.exit_code == 0
-        assert "追加:" in result.stdout
+        assert "Added:" in result.stdout
 
-        # ファイル内容を確認
+        # Verify file content
         content = todo_file.read_text(encoding="utf-8")
         lines = content.strip().split("\n")
         assert len(lines) == 1
 
-        # 作成日（YYYY-MM-DD形式）が含まれていることを確認
+        # Verify creation date (YYYY-MM-DD format) is present
         import re
 
-        assert re.match(r"\d{4}-\d{2}-\d{2} テストタスク", lines[0])
+        assert re.match(r"\d{4}-\d{2}-\d{2} Test task", lines[0])
 
     def test_task_in_appends_to_existing_file(self, tmp_path: Path) -> None:
-        """既存ファイルへのタスク追加を確認"""
+        """Verify task is appended to existing file."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("既存タスク\n", encoding="utf-8")
+        todo_file.write_text("Existing task\n", encoding="utf-8")
 
         result = runner.invoke(
-            app, ["--file", str(todo_file), "task", "in", "新規タスク"]
+            app, ["--file", str(todo_file), "task", "in", "New task"]
         )
 
         assert result.exit_code == 0
         lines = todo_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
-        assert lines[0] == "既存タスク"
-        assert "新規タスク" in lines[1]
+        assert lines[0] == "Existing task"
+        assert "New task" in lines[1]
 
     def test_task_in_with_priority(self, tmp_path: Path) -> None:
-        """優先度付きタスクの追加を確認"""
+        """Verify priority task is formatted correctly."""
         todo_file = tmp_path / "todo.txt"
 
         result = runner.invoke(
-            app, ["--file", str(todo_file), "task", "in", "(A) 重要タスク"]
+            app, ["--file", str(todo_file), "task", "in", "(A) Important task"]
         )
 
         assert result.exit_code == 0
         content = todo_file.read_text(encoding="utf-8").strip()
-        # 優先度の後に日付が挿入される
+        # Priority should come before date
         import re
 
-        assert re.match(r"\(A\) \d{4}-\d{2}-\d{2} 重要タスク", content)
+        assert re.match(r"\(A\) \d{4}-\d{2}-\d{2} Important task", content)
 
     def test_task_in_strips_newlines(self, tmp_path: Path) -> None:
-        """改行文字が除去されることを確認"""
+        """Verify newlines are stripped from task text."""
         todo_file = tmp_path / "todo.txt"
 
         result = runner.invoke(
-            app, ["--file", str(todo_file), "task", "in", "タスク\n改行あり"]
+            app, ["--file", str(todo_file), "task", "in", "Task\nwith newline"]
         )
 
         assert result.exit_code == 0
         content = todo_file.read_text(encoding="utf-8")
-        # 改行がスペースに置き換えられて1行になっている
+        # Newline should be replaced with space, single line in file
         assert content.count("\n") == 1
 
     def test_task_in_json_output(self, tmp_path: Path) -> None:
-        """JSON出力モードの確認"""
+        """Verify JSON output mode."""
         todo_file = tmp_path / "todo.txt"
 
         result = runner.invoke(
-            app, ["--file", str(todo_file), "--json", "task", "in", "JSONテスト"]
+            app, ["--file", str(todo_file), "--json", "task", "in", "JSON test"]
         )
 
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert "added" in data
-        assert "JSONテスト" in data["added"]
+        assert "JSON test" in data["added"]
 
 
 class TestTaskNext:
-    """tasq task next コマンドのテスト"""
+    """Tests for tasq task next command."""
 
     def test_task_next_returns_first_incomplete(self, tmp_path: Path) -> None:
-        """最初の未完了タスクが返されることを確認"""
+        """Verify first incomplete task is returned."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("最初のタスク\n2番目のタスク\n", encoding="utf-8")
+        todo_file.write_text("First task\nSecond task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "next"])
 
         assert result.exit_code == 0
-        assert "最初のタスク" in result.stdout
+        assert "First task" in result.stdout
 
     def test_task_next_skips_completed(self, tmp_path: Path) -> None:
-        """完了タスクがスキップされることを確認"""
+        """Verify completed tasks are skipped."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text(
-            "x 2024-01-01 済みタスク\nやることタスク\n", encoding="utf-8"
-        )
+        todo_file.write_text("x 2024-01-01 Done task\nTodo task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "next"])
 
         assert result.exit_code == 0
-        assert "やることタスク" in result.stdout
-        assert "済みタスク" not in result.stdout
+        assert "Todo task" in result.stdout
+        assert "Done task" not in result.stdout
 
     def test_task_next_no_incomplete_tasks(self, tmp_path: Path) -> None:
-        """未完了タスクがない場合のエラー確認"""
+        """Verify error when no incomplete tasks."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("x 2024-01-01 済みタスク\n", encoding="utf-8")
+        todo_file.write_text("x 2024-01-01 Done task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "next"])
 
         assert result.exit_code == 1
-        assert "未完了タスクがありません" in result.stdout
+        assert "No incomplete tasks" in result.stdout
 
     def test_task_next_file_not_found(self, tmp_path: Path) -> None:
-        """ファイルが存在しない場合のエラー確認"""
+        """Verify error when file doesn't exist."""
         todo_file = tmp_path / "nonexistent.txt"
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "next"])
@@ -136,10 +134,10 @@ class TestTaskNext:
         assert result.exit_code == 1
 
     def test_task_next_json_output(self, tmp_path: Path) -> None:
-        """JSON出力モードの確認"""
+        """Verify JSON output mode."""
         todo_file = tmp_path / "todo.txt"
         todo_file.write_text(
-            "(A) 2024-01-15 重要タスク +project @context due:2024-02-01\n",
+            "(A) 2024-01-15 Important task +project @context due:2024-02-01\n",
             encoding="utf-8",
         )
 
@@ -158,71 +156,71 @@ class TestTaskNext:
 
 
 class TestTaskDone:
-    """tasq task done コマンドのテスト"""
+    """Tests for tasq task done command."""
 
     def test_task_done_marks_first_incomplete(self, tmp_path: Path) -> None:
-        """最初の未完了タスクが完了としてマークされることを確認"""
+        """Verify first incomplete task is marked complete."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("タスク1\nタスク2\n", encoding="utf-8")
+        todo_file.write_text("Task 1\nTask 2\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
         assert result.exit_code == 0
-        assert "完了:" in result.stdout
+        assert "Done:" in result.stdout
 
         lines = todo_file.read_text(encoding="utf-8").strip().split("\n")
         assert lines[0].startswith("x ")
-        assert "タスク1" in lines[0]
-        # 2番目は未変更
-        assert lines[1] == "タスク2"
+        assert "Task 1" in lines[0]
+        # Second task unchanged
+        assert lines[1] == "Task 2"
 
     def test_task_done_with_completion_date(self, tmp_path: Path) -> None:
-        """完了日が正しい形式で追加されることを確認"""
+        """Verify completion date is added correctly."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("タスク\n", encoding="utf-8")
+        todo_file.write_text("Task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
         assert result.exit_code == 0
         content = todo_file.read_text(encoding="utf-8").strip()
-        # x YYYY-MM-DD 形式で始まる
+        # Should start with x YYYY-MM-DD
         import re
 
-        assert re.match(r"x \d{4}-\d{2}-\d{2} タスク", content)
+        assert re.match(r"x \d{4}-\d{2}-\d{2} Task", content)
 
     def test_task_done_preserves_creation_date(self, tmp_path: Path) -> None:
-        """作成日が保持されることを確認"""
+        """Verify creation date is preserved."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("2024-01-15 タスク\n", encoding="utf-8")
+        todo_file.write_text("2024-01-15 Task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
         assert result.exit_code == 0
         content = todo_file.read_text(encoding="utf-8").strip()
-        # x 完了日 作成日 タスク の順序
+        # Should be: x completion_date creation_date Task
         import re
 
-        match = re.match(r"x (\d{4}-\d{2}-\d{2}) (\d{4}-\d{2}-\d{2}) タスク", content)
+        match = re.match(r"x (\d{4}-\d{2}-\d{2}) (\d{4}-\d{2}-\d{2}) Task", content)
         assert match
-        assert match.group(2) == "2024-01-15"  # 作成日が保持されている
+        assert match.group(2) == "2024-01-15"  # Creation date preserved
 
     def test_task_done_priority_to_key_value(self, tmp_path: Path) -> None:
-        """優先度(A)がpri:Aに変換されることを確認"""
+        """Verify priority (A) is converted to pri:A."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("(A) 重要タスク\n", encoding="utf-8")
+        todo_file.write_text("(A) Important task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
         assert result.exit_code == 0
         content = todo_file.read_text(encoding="utf-8").strip()
-        # 先頭に(A)がなく、末尾にpri:Aがある
+        # Should not start with (A) and should have pri:A
         assert not content.startswith("(A)")
         assert "pri:A" in content
 
     def test_task_done_priority_with_creation_date(self, tmp_path: Path) -> None:
-        """優先度と作成日の両方がある場合の完了処理を確認"""
+        """Verify priority and creation date are handled correctly."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("(B) 2024-01-15 タスク\n", encoding="utf-8")
+        todo_file.write_text("(B) 2024-01-15 Task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
@@ -230,34 +228,32 @@ class TestTaskDone:
         content = todo_file.read_text(encoding="utf-8").strip()
         import re
 
-        # x 完了日 作成日 タスク pri:B の順序
+        # Should be: x completion_date creation_date Task pri:B
         match = re.match(
-            r"x (\d{4}-\d{2}-\d{2}) (\d{4}-\d{2}-\d{2}) タスク pri:B", content
+            r"x (\d{4}-\d{2}-\d{2}) (\d{4}-\d{2}-\d{2}) Task pri:B", content
         )
         assert match
         assert match.group(2) == "2024-01-15"
 
     def test_task_done_skips_completed(self, tmp_path: Path) -> None:
-        """既に完了したタスクがスキップされることを確認"""
+        """Verify already completed tasks are skipped."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text(
-            "x 2024-01-01 済みタスク\nやることタスク\n", encoding="utf-8"
-        )
+        todo_file.write_text("x 2024-01-01 Done task\nTodo task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
         assert result.exit_code == 0
         lines = todo_file.read_text(encoding="utf-8").strip().split("\n")
-        # 1行目は変更なし
-        assert lines[0] == "x 2024-01-01 済みタスク"
-        # 2行目が完了に
+        # First line unchanged
+        assert lines[0] == "x 2024-01-01 Done task"
+        # Second line completed
         assert lines[1].startswith("x ")
-        assert "やることタスク" in lines[1]
+        assert "Todo task" in lines[1]
 
     def test_task_done_no_incomplete_tasks(self, tmp_path: Path) -> None:
-        """未完了タスクがない場合のエラー確認"""
+        """Verify error when no incomplete tasks."""
         todo_file = tmp_path / "todo.txt"
-        todo_file.write_text("x 2024-01-01 済みタスク\n", encoding="utf-8")
+        todo_file.write_text("x 2024-01-01 Done task\n", encoding="utf-8")
 
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 

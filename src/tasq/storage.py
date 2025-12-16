@@ -1,6 +1,6 @@
-"""ストレージモジュール - ファイルI/O操作
+"""Storage module for todo.txt file operations.
 
-アトミック書き込みとファイルロックを提供する。
+Provides atomic writes and file locking for safe concurrent access.
 """
 
 import os
@@ -10,42 +10,43 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-# Windowsの場合はmsvcrt、それ以外はfcntlを使用
+from tasq.todotxt import Task
+
+# Platform-specific file locking
 if sys.platform == "win32":
     import msvcrt
 
     def _lock_file(f) -> None:
-        """Windowsでファイルをロックする"""
+        """Lock a file on Windows."""
         msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
 
     def _unlock_file(f) -> None:
-        """Windowsでファイルロックを解除する"""
+        """Unlock a file on Windows."""
         try:
             f.seek(0)
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
-            pass  # ロック解除失敗は無視
+            pass
 else:
     import fcntl
 
     def _lock_file(f) -> None:
-        """Unix系でファイルをロックする"""
+        """Lock a file on Unix systems."""
         fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def _unlock_file(f) -> None:
-        """Unix系でファイルロックを解除する"""
+        """Unlock a file on Unix systems."""
         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
 def file_lock(path: Path) -> Generator[None, None, None]:
-    """ファイルロックを取得するコンテキストマネージャ
+    """Context manager for acquiring a file lock.
 
-    ベストエフォートでロックを取得する。
-    ロック取得に失敗した場合でも処理は継続する（警告のみ）。
+    Best-effort locking: continues even if lock acquisition fails.
 
     Args:
-        path: ロック対象のファイルパス
+        path: Path to the file to lock.
 
     Yields:
         None
@@ -54,13 +55,11 @@ def file_lock(path: Path) -> Generator[None, None, None]:
     lock_file = None
 
     try:
-        # ロックファイルを作成してロック取得
         lock_file = open(lock_path, "w", encoding="utf-8")
         try:
             _lock_file(lock_file)
         except (OSError, BlockingIOError):
-            # ロック取得失敗は警告のみで継続
-            pass
+            pass  # Continue without lock
 
         yield
 
@@ -71,94 +70,202 @@ def file_lock(path: Path) -> Generator[None, None, None]:
             except (OSError, ValueError):
                 pass
             lock_file.close()
-            # ロックファイルを削除（失敗しても無視）
             try:
                 lock_path.unlink()
             except OSError:
                 pass
 
 
+class TodoFile:
+    """Manages reading and writing of a todo.txt file.
+
+    Provides atomic writes and file locking for safe file operations.
+
+    Attributes:
+        path: Path to the todo.txt file.
+    """
+
+    def __init__(self, path: Path) -> None:
+        """Initialize with a path to the todo.txt file.
+
+        Args:
+            path: Path to the todo.txt file.
+        """
+        self.path = path
+
+    def exists(self) -> bool:
+        """Check if the todo.txt file exists.
+
+        Returns:
+            True if the file exists.
+        """
+        return self.path.exists()
+
+    def read_lines(self) -> list[str]:
+        """Read all lines from the file.
+
+        Returns:
+            List of lines without trailing newlines.
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist.
+        """
+        with open(self.path, "r", encoding="utf-8") as f:
+            return [line.rstrip("\n\r") for line in f]
+
+    def read_tasks(self) -> list[Task]:
+        """Read and parse all tasks from the file.
+
+        Returns:
+            List of Task objects.
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist.
+        """
+        lines = self.read_lines()
+        return [Task.parse(line) for line in lines if line.strip()]
+
+    def write_lines(self, lines: list[str]) -> None:
+        """Atomically write lines to the file.
+
+        Uses a temporary file and rename for atomicity.
+
+        Args:
+            lines: List of lines to write.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        fd, tmp_path = tempfile.mkstemp(
+            dir=self.path.parent, prefix=".tasq_", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+
+            os.replace(tmp_path, self.path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def write_tasks(self, tasks: list[Task]) -> None:
+        """Atomically write tasks to the file.
+
+        Args:
+            tasks: List of Task objects to write.
+        """
+        lines = [task.to_line() for task in tasks]
+        self.write_lines(lines)
+
+    def append_task(self, task: Task) -> None:
+        """Append a single task to the file.
+
+        Creates the file if it doesn't exist.
+
+        Args:
+            task: Task object to append.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        with file_lock(self.path):
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(task.to_line() + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+
+    def get_next_incomplete(self) -> tuple[int, Task] | None:
+        """Find the first incomplete task.
+
+        Returns:
+            Tuple of (index, Task) or None if no incomplete tasks.
+        """
+        if not self.exists():
+            return None
+
+        lines = self.read_lines()
+        for index, line in enumerate(lines):
+            if line.strip() and not line.strip().startswith("x "):
+                return index, Task.parse(line)
+
+        return None
+
+    def complete_task(self, index: int) -> Task:
+        """Mark a task at the given index as complete.
+
+        Args:
+            index: Zero-based line index.
+
+        Returns:
+            The completed Task object.
+
+        Raises:
+            IndexError: If the index is out of range.
+        """
+        with file_lock(self.path):
+            lines = self.read_lines()
+            if index < 0 or index >= len(lines):
+                raise IndexError(
+                    f"Line index {index} out of range (0-{len(lines) - 1})"
+                )
+
+            task = Task.parse(lines[index])
+            completed_task = task.mark_complete()
+            lines[index] = completed_task.to_line()
+
+            self.write_lines(lines)
+
+            return completed_task
+
+
+# Backward compatibility functions
 def read_lines(path: Path) -> list[str]:
-    """ファイルから全行を読み込む
+    """Read all lines from a file.
 
     Args:
-        path: 読み込むファイルのパス
+        path: Path to the file.
 
     Returns:
-        行のリスト（改行文字は含まない）
-
-    Raises:
-        FileNotFoundError: ファイルが存在しない場合
+        List of lines without trailing newlines.
     """
-    with open(path, "r", encoding="utf-8") as f:
-        return [line.rstrip("\n\r") for line in f]
+    todo_file = TodoFile(path)
+    return todo_file.read_lines()
 
 
 def write_lines_atomic(path: Path, lines: list[str]) -> None:
-    """ファイルにアトミックに行を書き込む
-
-    一時ファイルに書き込み、fsyncしてからリネームすることで
-    書き込み途中でのデータ破損を防ぐ。
+    """Atomically write lines to a file.
 
     Args:
-        path: 書き込み先のファイルパス
-        lines: 書き込む行のリスト
+        path: Path to the file.
+        lines: Lines to write.
     """
-    # 親ディレクトリを取得（同一ファイルシステム内でリネームするため）
-    parent_dir = path.parent
-    parent_dir.mkdir(parents=True, exist_ok=True)
-
-    # 一時ファイルに書き込み
-    fd, tmp_path = tempfile.mkstemp(dir=parent_dir, prefix=".tasq_", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for line in lines:
-                f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-
-        # アトミックにリネーム
-        # Windowsではos.replaceで既存ファイルを上書き可能
-        os.replace(tmp_path, path)
-    except Exception:
-        # エラー時は一時ファイルを削除
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    todo_file = TodoFile(path)
+    todo_file.write_lines(lines)
 
 
 def append_line(path: Path, line: str) -> None:
-    """ファイルに1行追加する
-
-    ファイルが存在しない場合は作成する。
+    """Append a line to a file.
 
     Args:
-        path: 追加先のファイルパス
-        line: 追加する行（改行は自動付与）
+        path: Path to the file.
+        line: Line to append.
     """
-    # 親ディレクトリを作成
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with file_lock(path):
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+    task = Task.parse(line)
+    todo_file = TodoFile(path)
+    todo_file.append_task(task)
 
 
 def update_line(path: Path, index: int, new_line: str) -> None:
-    """ファイル内の特定行を更新する
+    """Update a specific line in a file.
 
     Args:
-        path: 更新するファイルのパス
-        index: 更新する行のインデックス（0始まり）
-        new_line: 新しい行の内容
-
-    Raises:
-        FileNotFoundError: ファイルが存在しない場合
-        IndexError: インデックスが範囲外の場合
+        path: Path to the file.
+        index: Zero-based line index.
+        new_line: New content for the line.
     """
     with file_lock(path):
         lines = read_lines(path)

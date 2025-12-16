@@ -1,145 +1,141 @@
 # tasq
 
-**todo.txt互換のFIFOキュー型タスク管理CLIツール**
+**A todo.txt-compatible task tool that treats a human like a tube (FIFO queue)**
 
-tasqは人間を「チューブ（FIFOキュー）」として扱うタスク管理ツールです。優先度管理のUXを排除し、ファイルの順序がそのままキューの順序となります。
+tasq is a task management tool that treats humans as a "tube" (FIFO queue). It eliminates priority management UX for a simpler workflow: first in, first out.
 
-## 特徴
+## Features
 
-- 📋 **todo.txt形式完全互換** - 既存のtodo.txtエコシステムと連携可能
-- 🔄 **FIFOキュー** - 最初のタスクから順番に処理
-- ⚡ **シンプルなワークフロー** - `in`（追加）→ `next`（確認）→ `done`（完了）
-- 🔧 **柔軟な設定** - CLI、環境変数、設定ファイルで設定可能
+- 📋 **todo.txt compatible** - Works with the existing todo.txt ecosystem
+- 🔄 **FIFO queue** - Process tasks in order, from first to last
+- ⚡ **Simple workflow** - `in` (add) → `next` (peek) → `done` (complete)
+- 🔧 **Flexible configuration** - CLI, environment variable, or config file
 
-## インストール
+## Installation
 
-### uv tools でインストール（推奨）
+### Install with uv tools (recommended)
 
 ```bash
-# 試用（一時的に実行）
-uvx --from git+https://github.com/<USER>/<REPO> tasq --help
+# Try it out (temporary)
+uvx --from git+https://github.com/shima10-x1p/tasq tasq --help
 
-# 永続インストール
-uv tool install git+https://github.com/<USER>/<REPO>
+# Install permanently
+uv tool install git+https://github.com/shima10-x1p/tasq
 
-# PATHが通っていない場合
+# If PATH is not set
 uv tool update-shell
 ```
 
-### pip でインストール
+### Install with pip
 
 ```bash
-pip install git+https://github.com/<USER>/<REPO>
+pip install git+https://github.com/shima10-x1p/tasq
 ```
 
-## 使い方
+## Usage
 
-### 基本的なワークフロー
+### Basic Workflow
 
 ```bash
-# タスクを追加（キューの末尾に追加）
-tasq task in "レポートを書く"
-tasq task in "メールを返信する"
-tasq task in "(A) 緊急の電話をかける"
+# Add tasks (appends to end of queue)
+tasq task in "Write report"
+tasq task in "Reply to emails"
+tasq task in "(A) Make urgent call"
 
-# 次のタスクを確認（キューの先頭）
+# View next task (peek at front of queue)
 tasq task next
-# 出力: 2024-12-16 レポートを書く
+# Output: 2024-12-16 Write report
 
-# タスクを完了（キューの先頭を完了としてマーク）
+# Complete task (marks front of queue as done)
 tasq task done
-# 出力: 完了: x 2024-12-16 2024-12-16 レポートを書く
+# Output: Done: x 2024-12-16 2024-12-16 Write report
 
-# 次のタスクを確認
+# View next task
 tasq task next
-# 出力: 2024-12-16 メールを返信する
+# Output: 2024-12-16 Reply to emails
 ```
 
-### 設定
+### Configuration
 
 ```bash
-# 現在のtodo.txtパスを確認
+# Show current todo.txt path
 tasq config path
 
-# todo.txtのパスを設定
+# Set default todo.txt path
 tasq config set-path ~/Documents/todo.txt
 
-# 環境変数で設定
+# Set via environment variable
 export TASQ_FILE=~/my-todo.txt
 
-# CLIオプションで一時的に指定
+# Override temporarily via CLI
 tasq --file ./project-todo.txt task next
 ```
 
-### 設定優先順位
+### Configuration Priority
 
-1. CLIオプション (`--file PATH`)
-2. 環境変数 (`TASQ_FILE`)
-3. 設定ファイル (`~/.config/tasq/config.toml`)
-4. デフォルト (`./todo.txt` または `~/todo.txt`)
+1. CLI option (`--file PATH`)
+2. Environment variable (`TASQ_FILE`)
+3. Config file (`~/.config/tasq/config.toml`)
+4. Default (`./todo.txt` or `~/todo.txt`)
 
-### JSON出力
+### JSON Output
 
 ```bash
-# 機械可読なJSON形式で出力
+# Machine-readable JSON output
 tasq --json task next
-# 出力: {"index": 0, "text": "2024-12-16 タスク", "completed": false, ...}
+# Output: {"index": 0, "text": "2024-12-16 Task", "completed": false, ...}
 ```
 
-## コマンド一覧
+## Commands
 
-| コマンド | 説明 |
-|---------|------|
-| `tasq task in TEXT` | 新しいタスクをキューの末尾に追加 |
-| `tasq task next` | キューの先頭にある次の未完了タスクを表示 |
-| `tasq task done` | キューの先頭のタスクを完了としてマーク |
-| `tasq config path` | 現在のtodo.txtパスとソースを表示 |
-| `tasq config set-path PATH` | デフォルトのtodo.txtパスを設定 |
-| `tasq self version` | バージョンを表示 |
+| Command | Description |
+|---------|-------------|
+| `tasq task in TEXT` | Add a new task to the end of the queue |
+| `tasq task next` | Show the next incomplete task |
+| `tasq task done` | Mark the next incomplete task as complete |
+| `tasq config path` | Show the resolved todo.txt path |
+| `tasq config set-path PATH` | Set the default todo.txt path |
+| `tasq self version` | Show version |
 
-## グローバルオプション
+## Global Options
 
-| オプション | 短縮形 | 説明 |
-|-----------|--------|------|
-| `--file PATH` | `-f` | todo.txtファイルのパスを指定 |
-| `--json` | `-j` | JSON形式で出力 |
-| `--verbose` | `-v` | 詳細ログを表示 |
-| `--version` | `-V` | バージョンを表示 |
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--file PATH` | `-f` | Specify todo.txt file path |
+| `--json` | `-j` | Output in JSON format |
+| `--verbose` | `-v` | Show verbose output |
+| `--version` | `-V` | Show version and exit |
 
-## todo.txt互換性
+## todo.txt Compatibility
 
-tasqは[todo.txt形式](https://github.com/todotxt/todo.txt)に完全準拠しています：
+tasq follows the [todo.txt format](https://github.com/todotxt/todo.txt):
 
-- **優先度**: `(A) タスク` - A-Zの優先度
-- **作成日**: `YYYY-MM-DD タスク` - ISO 8601形式
-- **完了**: `x YYYY-MM-DD タスク` - 完了日付き
-- **プロジェクト**: `+project` - プロジェクトタグ
-- **コンテキスト**: `@context` - コンテキストタグ
-- **メタデータ**: `key:value` - カスタムメタデータ
+- **Priority**: `(A) Task` - A-Z priority levels
+- **Creation date**: `YYYY-MM-DD Task` - ISO 8601 format
+- **Completion**: `x YYYY-MM-DD Task` - With completion date
+- **Projects**: `+project` - Project tags
+- **Contexts**: `@context` - Context tags
+- **Metadata**: `key:value` - Custom metadata
 
-### 完了時の処理
+### Completion Behavior
 
-- `x ` + 完了日を先頭に追加
-- 作成日がある場合は完了日の後に配置
-- 優先度 `(A)` は `pri:A` に変換して保持
+- Adds `x ` prefix with completion date
+- Preserves creation date after completion date
+- Converts priority `(A)` to `pri:A` metadata
 
-## 開発
+## Development
 
 ```bash
-# リポジトリをクローン
-git clone https://github.com/<USER>/<REPO>
+# Clone repository
+git clone https://github.com/shima10-x1p/tasq.git
 cd tasq
 
-# 開発環境セットアップ
+# Setup development environment
 uv sync --dev
 
-# テスト実行
+# Run tests
 uv run pytest tests/ -v
 
-# ローカルで実行
+# Run locally
 uv run tasq --help
 ```
-
-## ライセンス
-
-MIT License
