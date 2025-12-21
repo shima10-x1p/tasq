@@ -217,6 +217,159 @@ def task_done() -> None:
         typer.echo(f"Done: {completed_task.to_line()}")
 
 
+@task_app.command("list")
+def task_list(
+    show_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            "-a",
+            help="Include completed tasks",
+        ),
+    ] = False,
+    completed: Annotated[
+        bool,
+        typer.Option(
+            "--completed",
+            "-c",
+            help="Show only completed tasks",
+        ),
+    ] = False,
+    limit: Annotated[
+        Optional[int],
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum number of tasks to display",
+        ),
+    ] = None,
+) -> None:
+    """List tasks from todo.txt without modifying the file.
+
+    By default, shows only incomplete tasks in file order (queue order).
+    Tasks are never sorted; order reflects the queue.
+    """
+    config = Config(_context.file)
+    todo_path = config.todo_file_path
+
+    if _context.verbose:
+        typer.echo(f"[verbose] todo.txt: {todo_path} (from {config.source})")
+
+    todo_file = TodoFile(todo_path)
+
+    # Get all tasks with indices
+    all_tasks = todo_file.get_all_tasks_with_indices()
+
+    # Filter tasks based on options
+    filtered_tasks = []
+    for index, raw, task in all_tasks:
+        if completed:
+            # --completed: only completed tasks
+            if task.completed:
+                filtered_tasks.append((index, raw, task))
+        elif show_all:
+            # --all: all tasks
+            filtered_tasks.append((index, raw, task))
+        else:
+            # Default: only incomplete tasks
+            if not task.completed:
+                filtered_tasks.append((index, raw, task))
+
+    # Apply limit
+    if limit is not None and limit > 0:
+        filtered_tasks = filtered_tasks[:limit]
+
+    # Output
+    if _context.json_output:
+        result = []
+        for index, raw, task in filtered_tasks:
+            result.append(
+                {
+                    "index": index,
+                    "raw": raw,
+                    "completed": task.completed,
+                    "completion_date": task.completion_date,
+                    "creation_date": task.creation_date,
+                    "priority": task.priority,
+                    "projects": task.projects,
+                    "contexts": task.contexts,
+                    "key_values": task.key_values,
+                }
+            )
+        typer.echo(json.dumps(result, ensure_ascii=False))
+    else:
+        for index, raw, task in filtered_tasks:
+            typer.echo(f"[{index}] {raw}")
+
+
+@task_app.command("skip")
+def task_skip() -> None:
+    """Skip the first incomplete task by moving it to the end of the queue.
+
+    Moves the first incomplete task to after all other incomplete tasks,
+    but before any completed tasks. This is equivalent to dequeue+enqueue
+    in a FIFO queue.
+
+    The task content is preserved exactly; no timestamps or tags are added.
+    """
+    config = Config(_context.file)
+    todo_path = config.todo_file_path
+
+    if _context.verbose:
+        typer.echo(f"[verbose] todo.txt: {todo_path} (from {config.source})")
+
+    todo_file = TodoFile(todo_path)
+
+    # Check if file exists
+    if not todo_file.exists():
+        if _context.json_output:
+            typer.echo(
+                json.dumps(
+                    {
+                        "moved": False,
+                        "error": "No tasks found (file does not exist)",
+                    }
+                )
+            )
+        else:
+            typer.echo("No tasks found (file does not exist)", err=True)
+        raise typer.Exit(code=1)
+
+    # Attempt to skip
+    result = todo_file.skip_first_incomplete()
+
+    if result is None:
+        if _context.json_output:
+            typer.echo(
+                json.dumps(
+                    {
+                        "moved": False,
+                        "error": "No incomplete tasks to skip",
+                    }
+                )
+            )
+        else:
+            typer.echo("No incomplete tasks to skip", err=True)
+        raise typer.Exit(code=1)
+
+    from_idx, to_idx, raw = result
+
+    if _context.json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "moved": True,
+                    "from_index": from_idx,
+                    "to_index": to_idx,
+                    "raw": raw,
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        typer.echo(f"Skipped: [{from_idx}] → [{to_idx}] {raw}")
+
+
 # ===== config subcommands =====
 
 

@@ -221,6 +221,76 @@ class TodoFile:
 
             return completed_task
 
+    def get_all_tasks_with_indices(
+        self,
+    ) -> list[tuple[int, str, Task]]:
+        """Get all tasks with their original line indices.
+
+        Returns:
+            List of tuples (index, raw_line, Task).
+            Returns empty list if file doesn't exist.
+        """
+        if not self.exists():
+            return []
+
+        lines = self.read_lines()
+        result = []
+        for index, line in enumerate(lines):
+            if line.strip():  # Skip empty lines
+                task = Task.parse(line)
+                result.append((index, line, task))
+        return result
+
+    def skip_first_incomplete(self) -> tuple[int, int, str] | None:
+        """Move the first incomplete task to end of incomplete block.
+
+        Finds the first incomplete task and moves it after all other
+        incomplete tasks but before any completed tasks.
+
+        Returns:
+            Tuple of (from_index, to_index, raw_line) if moved.
+            None if no incomplete task exists.
+        """
+        if not self.exists():
+            return None
+
+        with file_lock(self.path):
+            lines = self.read_lines()
+
+            # Find the first incomplete task
+            first_incomplete_idx = None
+            for idx, line in enumerate(lines):
+                if line.strip() and not line.strip().startswith("x "):
+                    first_incomplete_idx = idx
+                    break
+
+            if first_incomplete_idx is None:
+                return None
+
+            # Find the last incomplete task (insertion point)
+            last_incomplete_idx = first_incomplete_idx
+            for idx in range(first_incomplete_idx + 1, len(lines)):
+                line = lines[idx]
+                if line.strip() and not line.strip().startswith("x "):
+                    last_incomplete_idx = idx
+
+            # If first == last, nothing to move
+            if first_incomplete_idx == last_incomplete_idx:
+                return None
+
+            # Remove the first incomplete task
+            moved_line = lines.pop(first_incomplete_idx)
+
+            # Insert after the last incomplete task
+            # (Note: index shifted by -1 due to pop)
+            new_idx = last_incomplete_idx  # This is already adjusted
+            lines.insert(new_idx, moved_line)
+
+            # Write atomically
+            self.write_lines(lines)
+
+            return (first_incomplete_idx, new_idx, moved_line)
+
 
 # Backward compatibility functions
 def read_lines(path: Path) -> list[str]:

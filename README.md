@@ -53,6 +53,16 @@ tasq task done
 # View next task
 tasq task next
 # Output: 2024-12-16 Reply to emails
+
+# List all pending tasks (queue order)
+tasq task list
+# Output:
+# [0] 2024-12-16 Reply to emails
+# [1] (A) 2024-12-16 Make urgent call
+
+# Skip (postpone) the current task to end of queue
+tasq task skip
+# Output: Skipped: [0] → [1] 2024-12-16 Reply to emails
 ```
 
 ### Configuration
@@ -93,9 +103,19 @@ tasq --json task next
 | `tasq task in TEXT` | Add a new task to the end of the queue |
 | `tasq task next` | Show the next incomplete task |
 | `tasq task done` | Mark the next incomplete task as complete |
+| `tasq task list` | List tasks (default: incomplete only, queue order) |
+| `tasq task skip` | Move first incomplete task to end of queue |
 | `tasq config path` | Show the resolved todo.txt path |
 | `tasq config set-path PATH` | Set the default todo.txt path |
 | `tasq self version` | Show version |
+
+### List Options
+
+| Option | Description |
+|--------|-------------|
+| `--all, -a` | Include completed tasks |
+| `--completed, -c` | Show only completed tasks |
+| `--limit N, -n N` | Limit output to N tasks |
 
 ## Global Options
 

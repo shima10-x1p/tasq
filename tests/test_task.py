@@ -258,3 +258,213 @@ class TestTaskDone:
         result = runner.invoke(app, ["--file", str(todo_file), "task", "done"])
 
         assert result.exit_code == 1
+
+
+class TestTaskList:
+    """Tests for tasq task list command."""
+
+    def test_list_default_shows_incomplete_only(self, tmp_path: Path) -> None:
+        """Verify default behavior shows only incomplete tasks."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text(
+            "Task 1\nx 2024-01-01 Done task\nTask 2\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "list"])
+
+        assert result.exit_code == 0
+        assert "[0] Task 1" in result.stdout
+        assert "[2] Task 2" in result.stdout
+        assert "Done task" not in result.stdout
+
+    def test_list_all_includes_completed(self, tmp_path: Path) -> None:
+        """Verify --all includes completed tasks."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text(
+            "Task 1\nx 2024-01-01 Done task\nTask 2\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "list", "--all"])
+
+        assert result.exit_code == 0
+        assert "[0] Task 1" in result.stdout
+        assert "[1] x 2024-01-01 Done task" in result.stdout
+        assert "[2] Task 2" in result.stdout
+
+    def test_list_completed_only(self, tmp_path: Path) -> None:
+        """Verify --completed shows only completed tasks."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("Task 1\nx 2024-01-01 Done task\n", encoding="utf-8")
+
+        result = runner.invoke(
+            app, ["--file", str(todo_file), "task", "list", "--completed"]
+        )
+
+        assert result.exit_code == 0
+        assert "Task 1" not in result.stdout
+        assert "[1] x 2024-01-01 Done task" in result.stdout
+
+    def test_list_limit(self, tmp_path: Path) -> None:
+        """Verify --limit caps output after filtering."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("Task 1\nTask 2\nTask 3\nTask 4\n", encoding="utf-8")
+
+        result = runner.invoke(
+            app, ["--file", str(todo_file), "task", "list", "--limit", "2"]
+        )
+
+        assert result.exit_code == 0
+        assert "[0] Task 1" in result.stdout
+        assert "[1] Task 2" in result.stdout
+        assert "Task 3" not in result.stdout
+        assert "Task 4" not in result.stdout
+
+    def test_list_json_output(self, tmp_path: Path) -> None:
+        """Verify JSON output format."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text(
+            "(A) 2024-01-15 Task +project @context due:2024-02-01\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app, ["--file", str(todo_file), "--json", "task", "list"]
+        )
+
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert len(data) == 1
+        assert data[0]["index"] == 0
+        assert data[0]["completed"] is False
+        assert data[0]["priority"] == "A"
+        assert data[0]["creation_date"] == "2024-01-15"
+        assert "project" in data[0]["projects"]
+        assert "context" in data[0]["contexts"]
+        assert data[0]["key_values"]["due"] == "2024-02-01"
+
+    def test_list_preserves_file_order(self, tmp_path: Path) -> None:
+        """Verify tasks are listed in file order, not sorted."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text(
+            "(C) Low priority\n(A) High priority\n(B) Medium priority\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "list"])
+
+        assert result.exit_code == 0
+        lines = result.stdout.strip().split("\n")
+        assert "Low priority" in lines[0]
+        assert "High priority" in lines[1]
+        assert "Medium priority" in lines[2]
+
+    def test_list_file_missing(self, tmp_path: Path) -> None:
+        """Verify empty output when file is missing."""
+        todo_file = tmp_path / "nonexistent.txt"
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "list"])
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == ""
+
+    def test_list_empty_file(self, tmp_path: Path) -> None:
+        """Verify empty output for empty file."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("", encoding="utf-8")
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "list"])
+
+        assert result.exit_code == 0
+        assert result.stdout.strip() == ""
+
+
+class TestTaskSkip:
+    """Tests for tasq task skip command."""
+
+    def test_skip_moves_first_incomplete_to_end(self, tmp_path: Path) -> None:
+        """Verify first incomplete task moves to end of incomplete block."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("Task 1\nTask 2\nTask 3\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "skip"])
+
+        assert result.exit_code == 0
+        assert "Skipped:" in result.stdout
+        assert "Task 1" in result.stdout
+
+        lines = todo_file.read_text(encoding="utf-8").strip().split("\n")
+        assert lines[0] == "Task 2"
+        assert lines[1] == "Task 3"
+        assert lines[2] == "Task 1"
+
+    def test_skip_keeps_completed_at_bottom(self, tmp_path: Path) -> None:
+        """Verify completed tasks stay at the bottom."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text(
+            "Task 1\nTask 2\nx 2024-01-01 Done task\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "skip"])
+
+        assert result.exit_code == 0
+        lines = todo_file.read_text(encoding="utf-8").strip().split("\n")
+        assert lines[0] == "Task 2"
+        assert lines[1] == "Task 1"
+        assert lines[2] == "x 2024-01-01 Done task"
+
+    def test_skip_no_content_change(self, tmp_path: Path) -> None:
+        """Verify task content is not modified."""
+        todo_file = tmp_path / "todo.txt"
+        original_task = "(A) 2024-01-15 Important task +project @context"
+        todo_file.write_text(f"{original_task}\nTask 2\n", encoding="utf-8")
+
+        runner.invoke(app, ["--file", str(todo_file), "task", "skip"])
+
+        lines = todo_file.read_text(encoding="utf-8").strip().split("\n")
+        assert lines[1] == original_task
+
+    def test_skip_single_incomplete_task(self, tmp_path: Path) -> None:
+        """Verify skip does nothing with only one incomplete task."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("Only task\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "skip"])
+
+        assert result.exit_code == 1
+        # Error output goes to stderr, use result.output
+        assert "No incomplete tasks to skip" in result.output
+
+    def test_skip_no_incomplete_tasks(self, tmp_path: Path) -> None:
+        """Verify error when no incomplete tasks."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("x 2024-01-01 Done task\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "skip"])
+
+        assert result.exit_code == 1
+        # Error output goes to stderr, use result.output
+        assert "No incomplete tasks to skip" in result.output
+
+    def test_skip_file_missing(self, tmp_path: Path) -> None:
+        """Verify error when file doesn't exist."""
+        todo_file = tmp_path / "nonexistent.txt"
+
+        result = runner.invoke(app, ["--file", str(todo_file), "task", "skip"])
+
+        assert result.exit_code == 1
+
+    def test_skip_json_output(self, tmp_path: Path) -> None:
+        """Verify JSON output format."""
+        todo_file = tmp_path / "todo.txt"
+        todo_file.write_text("Task 1\nTask 2\n", encoding="utf-8")
+
+        result = runner.invoke(
+            app, ["--file", str(todo_file), "--json", "task", "skip"]
+        )
+
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["moved"] is True
+        assert data["from_index"] == 0
+        assert data["to_index"] == 1
+        assert data["raw"] == "Task 1"
